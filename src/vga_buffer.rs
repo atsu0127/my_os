@@ -140,3 +140,54 @@ pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;
     WRITER.lock().write_fmt(args).unwrap();
 }
+
+// printlnで1行出力できるか
+#[test_case]
+fn test_println_simple() {
+    println!("test_println_simple output");
+}
+
+// printlnで複数行出力できるか
+#[test_case]
+fn test_println_many() {
+    for _ in 0..200 {
+        println!("test_println_many output");
+    }
+}
+
+// printlnで出力できているか
+#[test_case]
+fn test_println_output() {
+    let s = "Some test string that fits on a single line";
+    println!("{}", s);
+    for (i, c) in s.chars().enumerate() {
+        let screen_char = WRITER.lock().buffer.chars[BUFFER_HEIGHT - 2][i].read();
+        assert_eq!(char::from(screen_char.ascii_character), c);
+    }
+}
+
+// BUFFER_WIDTH以上の場合改行されるか
+#[test_case]
+fn test_println_newline() {
+    // 90文字
+    let s = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    println!("{}", s);
+
+    for i in 0..80 {
+        // 下から3行目の確認(sの最初の80文字)
+        let screen_char = WRITER.lock().buffer.chars[BUFFER_HEIGHT - 3][i].read();
+        assert_eq!(
+            Some(char::from(screen_char.ascii_character)),
+            s.chars().nth(i)
+        );
+
+        // 下から2行目の確認(sの残り + blank)
+        let screen_char = WRITER.lock().buffer.chars[BUFFER_HEIGHT - 2][i].read();
+        let expected = if i < s.len() - BUFFER_WIDTH {
+            s.chars().nth(i)
+        } else {
+            Some(' ')
+        };
+        assert_eq!(Some(char::from(screen_char.ascii_character)), expected);
+    }
+}
