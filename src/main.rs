@@ -11,6 +11,14 @@ use my_os::println;
 pub extern "C" fn _start() -> ! {
     println!("Hello World{}", "!");
 
+    my_os::init();
+
+    fn stack_overflow() {
+        stack_overflow();
+    }
+
+    stack_overflow();
+
     #[cfg(test)]
     test_main();
 
