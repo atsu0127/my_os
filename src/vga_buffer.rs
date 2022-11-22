@@ -2,6 +2,7 @@ use core::fmt;
 use lazy_static::lazy_static;
 use spin::Mutex;
 use volatile::Volatile;
+use x86_64::instructions::interrupts;
 
 lazy_static! {
     pub static ref WRITER: Mutex<Writer> = Mutex::new(Writer {
@@ -138,7 +139,12 @@ macro_rules! println {
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;
-    WRITER.lock().write_fmt(args).unwrap();
+    use x86_64::instructions::interrupts;
+
+    // 割り込み中はロックしない
+    interrupts::without_interrupts(|| {
+        WRITER.lock().write_fmt(args).unwrap();
+    });
 }
 
 // printlnで1行出力できるか
@@ -158,36 +164,49 @@ fn test_println_many() {
 // printlnで出力できているか
 #[test_case]
 fn test_println_output() {
+    use core::fmt::Write;
+    use x86_64::instructions::interrupts;
+
     let s = "Some test string that fits on a single line";
-    println!("{}", s);
-    for (i, c) in s.chars().enumerate() {
-        let screen_char = WRITER.lock().buffer.chars[BUFFER_HEIGHT - 2][i].read();
-        assert_eq!(char::from(screen_char.ascii_character), c);
-    }
+
+    interrupts::without_interrupts(|| {
+        let mut writer = WRITER.lock();
+        writeln!(writer, "\n{}", s).expect("writeln failed");
+        for (i, c) in s.chars().enumerate() {
+            let screen_char = writer.buffer.chars[BUFFER_HEIGHT - 2][i].read();
+            assert_eq!(char::from(screen_char.ascii_character), c);
+        }
+    });
 }
 
 // BUFFER_WIDTH以上の場合改行されるか
 #[test_case]
 fn test_println_newline() {
+    use core::fmt::Write;
+    use x86_64::instructions::interrupts;
+
     // 90文字
     let s = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    println!("{}", s);
 
-    for i in 0..80 {
-        // 下から3行目の確認(sの最初の80文字)
-        let screen_char = WRITER.lock().buffer.chars[BUFFER_HEIGHT - 3][i].read();
-        assert_eq!(
-            Some(char::from(screen_char.ascii_character)),
-            s.chars().nth(i)
-        );
+    interrupts::without_interrupts(|| {
+        let mut writer = WRITER.lock();
+        writeln!(writer, "\n{}", s).expect("writeln failed");
+        for i in 0..80 {
+            // 下から3行目の確認(sの最初の80文字)
+            let screen_char = writer.buffer.chars[BUFFER_HEIGHT - 3][i].read();
+            assert_eq!(
+                Some(char::from(screen_char.ascii_character)),
+                s.chars().nth(i)
+            );
 
-        // 下から2行目の確認(sの残り + blank)
-        let screen_char = WRITER.lock().buffer.chars[BUFFER_HEIGHT - 2][i].read();
-        let expected = if i < s.len() - BUFFER_WIDTH {
-            s.chars().nth(i)
-        } else {
-            Some(' ')
-        };
-        assert_eq!(Some(char::from(screen_char.ascii_character)), expected);
-    }
+            // 下から2行目の確認(sの残り + blank)
+            let screen_char = writer.buffer.chars[BUFFER_HEIGHT - 2][i].read();
+            let expected = if i < s.len() - BUFFER_WIDTH {
+                s.chars().nth(i)
+            } else {
+                Some(' ')
+            };
+            assert_eq!(Some(char::from(screen_char.ascii_character)), expected);
+        }
+    });
 }
