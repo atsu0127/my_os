@@ -2,7 +2,10 @@ use crate::gdt;
 use crate::print;
 use crate::println;
 use lazy_static::lazy_static;
+use pc_keyboard::Keyboard;
 use pic8259::ChainedPics;
+use spin::Mutex;
+use x86_64::instructions::port::Port;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 // IDTの初期化
@@ -17,6 +20,8 @@ lazy_static! {
         }
         idt[InterruptIndex::Timer.as_usize()]
             .set_handler_fn(timer_interrupt_handler); // timer割り込みハンドラ追加
+        idt[InterruptIndex::Keyboard.as_usize()]
+        .set_handler_fn(keyboard_interrupt_handler); // keyboard割り込みハンドラ追加
 
         idt
     };
@@ -39,6 +44,7 @@ pub static PICS: spin::Mutex<ChainedPics> =
 #[repr(u8)]
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
+    Keyboard,
 }
 
 impl InterruptIndex {
@@ -73,6 +79,41 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+    }
+}
+
+// Keyboard割り込みハンドラ
+extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
+    use spin::Mutex;
+    use x86_64::instructions::port::Port;
+
+    lazy_static! {
+        static ref KEYBOARD: Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> = Mutex::new(
+            Keyboard::new(layouts::Us104Key, ScancodeSet1, HandleControl::Ignore)
+        );
+    }
+
+    // keyboard準備
+    let mut keyboard = KEYBOARD.lock();
+
+    // 入力されたデータを読み込むためのポート
+    let mut port = Port::new(0x60);
+    let scancode: u8 = unsafe { port.read() };
+
+    // scancodeを値として取得
+    if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
+        if let Some(key) = keyboard.process_keyevent(key_event) {
+            match key {
+                DecodedKey::Unicode(character) => print!("{}", character),
+                DecodedKey::RawKey(key) => print!("{:?}", key),
+            }
+        }
+    }
+
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
     }
 }
 
