@@ -1,0 +1,125 @@
+use crate::gdt;
+use crate::print;
+use crate::println;
+use lazy_static::lazy_static;
+use pc_keyboard::Keyboard;
+use pic8259::ChainedPics;
+use spin::Mutex;
+use x86_64::instructions::port::Port;
+use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
+
+// IDTの初期化
+lazy_static! {
+    static ref IDT: InterruptDescriptorTable = {
+        let mut idt = InterruptDescriptorTable::new();
+        idt.breakpoint.set_handler_fn(breakpoint_handler);
+        unsafe {
+            idt.double_fault
+                .set_handler_fn(double_fault_handler)
+                .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX); // GDTへの参照追加
+        }
+        idt[InterruptIndex::Timer.as_usize()]
+            .set_handler_fn(timer_interrupt_handler); // timer割り込みハンドラ追加
+        idt[InterruptIndex::Keyboard.as_usize()]
+        .set_handler_fn(keyboard_interrupt_handler); // keyboard割り込みハンドラ追加
+
+        idt
+    };
+}
+
+pub fn init_idt() {
+    IDT.load();
+}
+
+// PICの初期化
+// 0~15の割り込みベクタはすでにCPU例外で使われているので使えない、そのため32~47にしている
+pub const PIC_1_OFFSET: u8 = 32;
+pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
+
+pub static PICS: spin::Mutex<ChainedPics> =
+    spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
+
+// PICの割り込みベクタ管理用
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum InterruptIndex {
+    Timer = PIC_1_OFFSET,
+    Keyboard,
+}
+
+impl InterruptIndex {
+    fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    fn as_usize(self) -> usize {
+        usize::from(self.as_u8())
+    }
+}
+
+// 各種ハンドラ
+// breakpointハンドラ
+extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
+    println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
+}
+
+// ダブルフォルトハンドラ
+extern "x86-interrupt" fn double_fault_handler(
+    stack_frame: InterruptStackFrame,
+    _error_code: u64,
+) -> ! {
+    panic!("EXCEPTION: DOUBLE FAULT\n{:#?}", stack_frame);
+}
+
+// Timer割り込みハンドラ
+extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    print!(".");
+
+    // 割り込みの終了の通知が必要
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+    }
+}
+
+// Keyboard割り込みハンドラ
+extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
+    use spin::Mutex;
+    use x86_64::instructions::port::Port;
+
+    lazy_static! {
+        static ref KEYBOARD: Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> = Mutex::new(
+            Keyboard::new(layouts::Us104Key, ScancodeSet1, HandleControl::Ignore)
+        );
+    }
+
+    // keyboard準備
+    let mut keyboard = KEYBOARD.lock();
+
+    // 入力されたデータを読み込むためのポート
+    let mut port = Port::new(0x60);
+    let scancode: u8 = unsafe { port.read() };
+
+    // scancodeを値として取得
+    if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
+        if let Some(key) = keyboard.process_keyevent(key_event) {
+            match key {
+                DecodedKey::Unicode(character) => print!("{}", character),
+                DecodedKey::RawKey(key) => print!("{:?}", key),
+            }
+        }
+    }
+
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+    }
+}
+
+// テスト
+// ブレイクポイント例外の確認
+#[test_case]
+fn test_breakpoint_exception() {
+    x86_64::instructions::interrupts::int3();
+}
