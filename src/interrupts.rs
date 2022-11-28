@@ -71,7 +71,7 @@ extern "x86-interrupt" fn double_fault_handler(
 
 // Timer割り込みハンドラ
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    print!(".");
+    // print!(".");
 
     // 割り込みの終了の通知が必要
     unsafe {
