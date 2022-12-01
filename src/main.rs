@@ -8,7 +8,7 @@ use bootloader::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use my_os::println;
 use x86_64::structures::paging::{Page, PageTable};
-use x86_64::VirtAddr;
+use my_os::memory::translate_addr;
 
 entry_point!(kernel_main);
 
@@ -19,25 +19,23 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     println!("Hello World{}", "!");
     my_os::init();
 
-    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset); // offset持ってくる
-    let l4_table = unsafe { active_level_4_table(phys_mem_offset) }; // offsetとCR3の内容からl4のtableの仮想アドレス取得
+    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
 
-    for (i, entry) in l4_table.iter().enumerate() {
-        if !entry.is_unused() {
-            println!("L4 Entry {}: {:?}", i, entry);
+    let addresses = [
+        // 恒等対応しているVGAバッファのページ
+        0xb8000,
+        // コードページのどこか
+        0x201008,
+        // スタックページのどこか
+        0x0100_0020_1a10,
+        // 物理アドレス "0" にマップされている仮想アドレス
+        boot_info.physical_memory_offset,
+    ];
 
-            let phys = entry.frame().unwrap().start_address(); // l4のtableのエントリ確認
-            let virt = phys.as_u64() + boot_info.physical_memory_offset; // エントリに対してoffset付け加える(= 仮想アドレスにする)
-            let ptr = VirtAddr::new(virt).as_mut_ptr(); // ptrにする
-            let l3_table: &PageTable = unsafe { &*ptr }; // 取得
-
-            // l3テーブルの空でないエントリを出力する
-            for (i, entry) in l3_table.iter().enumerate() {
-                if !entry.is_unused() {
-                    println!("  L3 Entry {}: {:?}", i, entry);
-                }
-            }
-        }
+    for &address in &addresses {
+        let virt = VirtAddr::new(address);
+        let phys = unsafe { translate_addr(virt, phys_mem_offset) };
+        println!("{:?} -> {:?}", virt, phys);
     }
 
     #[cfg(test)]
