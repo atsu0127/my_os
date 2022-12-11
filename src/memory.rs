@@ -1,3 +1,4 @@
+use bootloader::bootinfo::{MemoryMap, MemoryRegionType};
 use x86_64::structures::paging::{
     FrameAllocator, Mapper, OffsetPageTable, Page, PhysFrame, Size4KiB,
 };
@@ -38,34 +39,50 @@ pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static>
     OffsetPageTable::new(level_4_table, physical_memory_offset)
 }
 
-/// 与えられたページを物理フレーム`0xb8000`にマップする
-pub fn create_example_mapping(
-    page: Page,
-    mapper: &mut OffsetPageTable,
-    frame_allocator: &mut impl FrameAllocator<Size4KiB>,
-) {
-    use x86_64::structures::paging::PageTableFlags as Flags;
-
-    let frame = PhysFrame::containing_address(PhysAddr::new(0xb8000));
-    // PRESENT: 有効なエントリに必須のフラグ
-    // WRITABLE: ページを書き込み可能にする
-    let flags = Flags::PRESENT | Flags::WRITABLE;
-
-    // 呼び出し元のフレームがまだ使われてないことを保証しないとなのでunsafe
-    let map_to_result = unsafe {
-        // FIXME: unsafeで、テスト目的なので後で取り除く
-        mapper.map_to(page, frame, flags, frame_allocator)
-    };
-    // flush: マッピングしたページをTLBからflushできる
-    map_to_result.expect("map_to failed").flush();
+/// ブートローダのメモリマップから、使用可能な
+/// フレームを返すFrameAllocator
+pub struct BootInfoFrameAllocator {
+    memory_map: &'static MemoryMap,
+    next: usize,
 }
 
-/// 常に`None`を返すFrameAllocator
-pub struct EmptyFrameAllocator;
+impl BootInfoFrameAllocator {
+    /// 渡されたメモリマップからFrameAllocatorを作る。
+    ///
+    /// # Safety
+    /// 呼び出し元は渡された
+    /// メモリマップが有効であることを保証しなければ
+    /// ならない。特に、`USABLE`なフレームは実際に
+    /// 未使用でなくてはならない。
+    pub unsafe fn init(memory_map: &'static MemoryMap) -> Self {
+        BootInfoFrameAllocator {
+            memory_map,
+            next: 0,
+        }
+    }
+}
 
-// 実装したアロケーたが未使用のフレームのみを取得することを保証しないといけないのでunsafe
-unsafe impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
+impl BootInfoFrameAllocator {
+    /// メモリマップによって指定されたusableなフレームのイテレータを返す。
+    fn usable_frames(&self) -> impl Iterator<Item = PhysFrame> {
+        // メモリマップからusableな領域を得る
+        // 予約済みの領域は除外したい
+        let regions = self.memory_map.iter();
+        let usable_regions = regions.filter(|r| r.region_type == MemoryRegionType::Usable);
+        // それぞれの領域をアドレス範囲にmapで変換する
+        let addr_ranges = usable_regions.map(|r| r.range.start_addr()..r.range.end_addr());
+        // フレームの開始アドレスのイテレータへと変換する
+        // 1Pageが4096B(4KiB)なので、4096ごとになる
+        let frame_addresses = addr_ranges.flat_map(|r| r.step_by(4096));
+        // 開始アドレスから`PhysFrame`型を作る
+        frame_addresses.map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)))
+    }
+}
+
+unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
-        None
+        let frame = self.usable_frames().nth(self.next);
+        self.next += 1;
+        frame
     }
 }

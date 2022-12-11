@@ -6,6 +6,7 @@
 
 use bootloader::{entry_point, BootInfo};
 use core::panic::PanicInfo;
+use my_os::memory::BootInfoFrameAllocator;
 use my_os::{memory, println};
 use x86_64::structures::paging::{Page, PageTable, Translate};
 
@@ -20,7 +21,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
     // flame allocator作成
-    let mut frame_allocator = memory::EmptyFrameAllocator;
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
 
     // 未使用のページをマップする
     let page = Page::containing_address(VirtAddr::new(0));
