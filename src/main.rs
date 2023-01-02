@@ -14,7 +14,7 @@ use bootloader::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use my_os::memory::BootInfoFrameAllocator;
 use my_os::{allocator, memory, println};
-use x86_64::structures::paging::{Page, PageTable, Translate};
+
 
 entry_point!(kernel_main);
 

@@ -15,7 +15,7 @@ pub mod memory;
 pub mod serial;
 pub mod vga_buffer;
 
-use bootloader::{entry_point, BootInfo};
+
 use core::panic::PanicInfo;
 
 pub fn init() {
