@@ -2,7 +2,7 @@ use core::fmt;
 use lazy_static::lazy_static;
 use spin::Mutex;
 use volatile::Volatile;
-use x86_64::instructions::interrupts;
+
 
 lazy_static! {
     pub static ref WRITER: Mutex<Writer> = Mutex::new(Writer {
@@ -171,7 +171,7 @@ fn test_println_output() {
 
     interrupts::without_interrupts(|| {
         let mut writer = WRITER.lock();
-        writeln!(writer, "\n{}", s).expect("writeln failed");
+        writeln!(writer, "\n{s}").expect("writeln failed");
         for (i, c) in s.chars().enumerate() {
             let screen_char = writer.buffer.chars[BUFFER_HEIGHT - 2][i].read();
             assert_eq!(char::from(screen_char.ascii_character), c);
@@ -190,7 +190,7 @@ fn test_println_newline() {
 
     interrupts::without_interrupts(|| {
         let mut writer = WRITER.lock();
-        writeln!(writer, "\n{}", s).expect("writeln failed");
+        writeln!(writer, "\n{s}").expect("writeln failed");
         for i in 0..80 {
             // 下から3行目の確認(sの最初の80文字)
             let screen_char = writer.buffer.chars[BUFFER_HEIGHT - 3][i].read();
