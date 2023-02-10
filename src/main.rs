@@ -13,10 +13,11 @@ use alloc::vec::Vec;
 use bootloader::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use my_os::memory::BootInfoFrameAllocator;
-use my_os::{allocator, memory, println};
+use my_os::task::executor::Executor;
+use my_os::task::keyboard::print_keypresses;
 use my_os::task::simple_executor::SimpleExecutor;
 use my_os::task::Task;
-
+use my_os::{allocator, memory, println};
 
 entry_point!(kernel_main);
 
@@ -58,8 +59,9 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     );
 
     // 非同期関数実行
-    let mut executor = SimpleExecutor::new();
+    let mut executor = Executor::new();
     executor.spawn(Task::new(example_task()));
+    executor.spawn(Task::new(print_keypresses()));
     executor.run();
 
     #[cfg(test)]
